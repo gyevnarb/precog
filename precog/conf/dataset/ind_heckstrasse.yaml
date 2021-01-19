@@ -1,18 +1,17 @@
 dataset:
   class: precog.dataset.serialized_dataset.SerializedDataset
-  name: nuscenes_mini_preproc_v5_A5
+  name: ind_heckstrasse
   params:
-    root_path: /home/balint/Documents/precog/data/nuscenes_results
-    _max_A: 2
+    root_path: /home/balint/Documents/precog/data/ind_heckstrasse
+    _max_A: 5
     B: 10
-    T: 20
+    T: 50
+    T_past: 50
     load_bev: True
-    feature_pixels_per_meter: 2.
-    W: 100
+    feature_pixels_per_meter: 10.23
     fmt: 'dill'
     train_suffix: '/train/'
     val_suffix: '/val/'
     test_suffix: '/test/'
     match_prefix: "ma_datum_*"
-    _name: 'nuscenes_mini'
-
+    _name: 'ind_heckstrasse'

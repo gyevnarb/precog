@@ -1,4 +1,3 @@
-
 import copy
 import dill
 import hydra
@@ -22,12 +21,13 @@ np.set_printoptions(suppress=True, precision=4)
 
 log = logging.getLogger(__file__)
 
+
 class NuscenesConfig:
     # samples are at 2Hz
     sample_period = 2
     # LIDAR is at 20Hz
     lidar_Hz = 20
-    sample_frequency = 1./sample_period
+    sample_frequency = 1. / sample_period
 
     # Predict 4 seconds in the future with 1 second of past.
     past_horizon_seconds = 1
@@ -43,8 +43,8 @@ class NuscenesConfig:
     # Configuration for temporal interpolation.
     target_sample_period_past = 5
     target_sample_period_future = 5
-    target_sample_frequency_past = 1./target_sample_period_past
-    target_sample_frequency_future = 1./target_sample_period_future
+    target_sample_frequency_past = 1. / target_sample_period_past
+    target_sample_frequency_future = 1. / target_sample_period_future
     target_past_horizon = past_horizon_seconds * target_sample_period_past
     target_future_horizon = future_horizon_seconds * target_sample_period_future
     target_past_times = -1 * np.arange(0, past_horizon_seconds, target_sample_frequency_past)[::-1]
@@ -64,15 +64,16 @@ class NuscenesConfig:
     # Histogram size threshold.
     lidar_hist_max_per_pixel = 50
     # Vertical histogram bins (they define the right edges of the histogram)
-    lidar_zbins = np.array([-3.,   0.0, 1., 2.,  3., 10.])
+    lidar_zbins = np.array([-3., 0.0, 1., 2., 3., 10.])
     # Whether to normalize the histogram bins by the max count per pixel.
     hist_normalize = True
     # Whether to include the sematic map.
     include_semantic_prior = False
-        
+
+
 class NuscenesMultiagentDatum:
     scene = None
-    
+
     @classu.member_initialize
     def __init__(self,
                  player_past,
@@ -84,9 +85,10 @@ class NuscenesMultiagentDatum:
                  overhead_features,
                  metadata={}):
         pass
-    
+
     @classmethod
-    def from_nuscenes_sample(cls, nusc, sample, attribute_names=['vehicle.moving', 'vehicle.stopped'], cfg=None, offset=0.0):
+    def from_nuscenes_sample(cls, nusc, sample, attribute_names=['vehicle.moving', 'vehicle.stopped'], cfg=None,
+                             offset=0.0):
         """
 
         :param nusc: 
@@ -100,7 +102,7 @@ class NuscenesMultiagentDatum:
 
         """
         log.debug("Building datum from {}".format(sample['token']))
-        assert(cfg is not None)
+        assert (cfg is not None)
         sensor_tokens = sample['data']
 
         lid_channel = 'LIDAR_TOP'
@@ -159,7 +161,7 @@ class NuscenesMultiagentDatum:
 
         # World extrinsics + intrinsics of rear axle on driving car.
         ego_pose_now = get_ego_pose(lidar_sample_data['ego_pose_token'])
-        
+
         def transform_box(box, ego_pose):
             """Transform a box to a coordinate system on the ego-car
 
@@ -168,13 +170,13 @@ class NuscenesMultiagentDatum:
             :rtype: 
 
             """
-            
+
             # If doing ego-coords, just transform 
             if ego_pose_coords:
                 box.transform_to_pose(ego_pose)
             else:
                 box.transform_to_pose(ego_pose).transform_to_pose(lidar_extrinsics).transform_to_pose(pose_permute)
-        
+
         # Build a box for the ego-car at now. Note this is not really a good 'box' if it's centered at the ego_pose (rear axle)
         ego_box_now = dc.EgoBox.from_pose(ego_pose_now)
 
@@ -192,17 +194,19 @@ class NuscenesMultiagentDatum:
         if lidar_timestamps_relative[-1] < target_future_times[-1]:
             log.debug("Not enough future ego poses. Skipping.")
             return 1
-        
+
         # Interpolate boxes at the target times (global coordinates).
-        ego_boxes_past_interp = nuscenes_module.interpolate_boxes_to_times(ego_boxes_all, lidar_timestamps_relative, target_past_times)
-        ego_boxes_future_interp = nuscenes_module.interpolate_boxes_to_times(ego_boxes_all, lidar_timestamps_relative, target_future_times)
+        ego_boxes_past_interp = nuscenes_module.interpolate_boxes_to_times(ego_boxes_all, lidar_timestamps_relative,
+                                                                           target_past_times)
+        ego_boxes_future_interp = nuscenes_module.interpolate_boxes_to_times(ego_boxes_all, lidar_timestamps_relative,
+                                                                             target_future_times)
         ego_boxes_interp = ego_boxes_past_interp + ego_boxes_future_interp
 
         # The "now" box is the most recent past.
         ego_box_now = ego_boxes_past_interp[-1]
         ego_box_yaw = ego_box_now.get_yaw()
 
-        # Ego boxes in ego_pose now or lidar_pose now coordinates.
+        # Ego boxes in ego_pose_now or lidar_pose_now coordinates.
         _ = [transform_box(_, ego_pose_now) for _ in ego_boxes_interp]
 
         # Get annotations in current scene that match the relevant attributes.
@@ -219,7 +223,7 @@ class NuscenesMultiagentDatum:
         agent_dists = []
         agent_annotation_tokens = []
         agent_annotations = []
-        
+
         for ann in annotations:
             # Keyframed annotations.
             anns_future = nuscenes_module.traverse_linked_list(nusc, ann, 'sample_annotation', 'next')
@@ -240,18 +244,20 @@ class NuscenesMultiagentDatum:
             agent_annotations.append(ann)
 
             # Interpolate boxes at the target times (global coordinates.)
-            ann_boxes_past_interp = nuscenes_module.interpolate_boxes_to_times(ann_boxes, ann_timestamps_relative, target_past_times)
-            ann_boxes_future_interp = nuscenes_module.interpolate_boxes_to_times(ann_boxes, ann_timestamps_relative, target_future_times)
+            ann_boxes_past_interp = nuscenes_module.interpolate_boxes_to_times(ann_boxes, ann_timestamps_relative,
+                                                                               target_past_times)
+            ann_boxes_future_interp = nuscenes_module.interpolate_boxes_to_times(ann_boxes, ann_timestamps_relative,
+                                                                                 target_future_times)
             ann_boxes_interp = ann_boxes_past_interp + ann_boxes_future_interp
             ann_box_now = ann_boxes_past_interp[-1]
 
             # Annotation boxes in ego_pose now or lidar_pose now coordinates.
             _ = [transform_box(_, ego_pose_now) for _ in ann_boxes_interp]
-                        
+
             # Extract the positions.
             all_agent_pasts.append(np.stack([_.center for _ in ann_boxes_past_interp], axis=-2))
             all_agent_futures.append(np.stack([_.center for _ in ann_boxes_future_interp], axis=-2))
-            
+
             # Yaw in degrees.
             all_agent_yaws.append(ann_box_now.get_yaw() * 180 / np.pi)
             # TODO debug ann box distance? is it the same?
@@ -284,7 +290,7 @@ class NuscenesMultiagentDatum:
         # Compute inds to sort agents by their proximity to the ego-vehicle.        
         sorting_inds = np.argsort(agent_dists)
 
-        #todo debug sorting.
+        # todo debug sorting.
         # (A, Tp, d). Agent past trajectories in ego frame at t=now
         agent_pasts = np.stack(all_agent_pasts, axis=0)[sorting_inds]
         # (A, Tf, d). Agent future trajectories in ego frame at t=now
@@ -304,11 +310,12 @@ class NuscenesMultiagentDatum:
         if cfg.include_semantic_prior:
             # points should be at the center of the histogram cells (offset by half the cellwidth)
             cellwidth = xbins[1] - xbins[0]
-            mask = get_mask(nusc, (xbins + cellwidth/2)[:-1], t=ego_pose_now['translation'], ang=ego_box_yaw, scene_token=sample['scene_token'])
+            mask = get_mask(nusc, (xbins + cellwidth / 2)[:-1], t=ego_pose_now['translation'], ang=ego_box_yaw,
+                            scene_token=sample['scene_token'])
             # ??
             mask = np.flipud(mask)
-            BEV = np.concatenate((BEV, mask[...,None]), axis=-1)
-            
+            BEV = np.concatenate((BEV, mask[..., None]), axis=-1)
+
         datum = NuscenesMultiagentDatum(player_past,
                                         agent_pasts,
                                         player_future,
@@ -324,10 +331,12 @@ class NuscenesMultiagentDatum:
                                                   'ego_yaw': ego_box_yaw})
         return datum
 
+
 def fill_z(forecast_frame_points, mx=1.):
     future = forecast_frame_points
-    future_z = np.concatenate((future, mx*np.ones_like(future[:,[0]])), axis=-1).T
+    future_z = np.concatenate((future, mx * np.ones_like(future[:, [0]])), axis=-1).T
     return future_z
+
 
 def project_to_camera(nusc, forecast_frame_points, scene_token, cam_str, wmax=1600, hmax=900):
     """
@@ -342,7 +351,7 @@ def project_to_camera(nusc, forecast_frame_points, scene_token, cam_str, wmax=16
     :rtype: 
 
     """
-    
+
     sample = nusc.get('sample', scene_token)
     sample_data = nusc.get('sample_data', sample['data'][cam_str])
     cal = nusc.get('calibrated_sensor', sample_data['calibrated_sensor_token'])
@@ -353,18 +362,18 @@ def project_to_camera(nusc, forecast_frame_points, scene_token, cam_str, wmax=16
     else:
         # Fill in z coordinates. 
         future_fore_C_fore_R = fill_z(forecast_frame_points, mx=0.)
-        
+
     # Homog transform from ego to camera.
     cam_from_ego = gu.transform_matrix(cal['translation'], pyquaternion.Quaternion(cal['rotation']), inverse=True)
-    
+
     # Transform points from ego-frame to camera frame.
-    future_cam_C_cam_R = ((cam_from_ego[:3,:3] @ future_fore_C_fore_R).T + cam_from_ego[:3, 3]).T
+    future_cam_C_cam_R = ((cam_from_ego[:3, :3] @ future_fore_C_fore_R).T + cam_from_ego[:3, 3]).T
 
     # Project to the camera.
     points = gu.view_points(future_cam_C_cam_R, view=K, normalize=False)
     nbr_points = points.shape[1]
     z = points[2]
-    
+
     # Normalize the points.
     points = points / points[2:3, :].repeat(3, 0).reshape(3, nbr_points)
 
@@ -375,23 +384,24 @@ def project_to_camera(nusc, forecast_frame_points, scene_token, cam_str, wmax=16
     zib = 0 <= z
     pib = points[:, zib]
     return pib
-                
-def xyz_histogram(points, 
+
+
+def xyz_histogram(points,
                   meters_max=50,
                   pixels_per_meter=2,
                   hist_max_per_pixel=25,
                   zbins=np.linspace(-2, 1, 4),
                   hist_normalize=False):
-    assert(points.shape[-1] >= 3)
-    assert(points.shape[0] > points.shape[1])
+    assert (points.shape[-1] >= 3)
+    assert (points.shape[0] > points.shape[1])
     meters_total = meters_max * 2
     pixels_total = meters_total * pixels_per_meter
     xbins = np.linspace(-meters_max, meters_max, pixels_total + 1, endpoint=True)
     ybins = xbins
     # The first left bin edge must match the last right bin edge.
-    assert(np.isclose(xbins[0], -1 * xbins[-1]))
-    assert(np.isclose(ybins[0], -1 * ybins[-1]))
-    
+    assert (np.isclose(xbins[0], -1 * xbins[-1]))
+    assert (np.isclose(ybins[0], -1 * ybins[-1]))
+
     hist = np.histogramdd(points[..., :3], bins=(xbins, ybins, zbins), normed=False)[0]
 
     # Clip histogram 
@@ -404,19 +414,22 @@ def xyz_histogram(points,
         overhead_splat = hist
     return overhead_splat, xbins, ybins, zbins
 
+
 def get_mask_from_scene_token(nusc, scene_token):
     return nusc.get('map', nusc.get('log', nusc.get('scene', scene_token)['log_token'])['map_token'])['mask']
+
 
 def get_mask(nusc, x, t, ang, scene_token):
     mask = get_mask_from_scene_token(nusc, scene_token)
     xx, yy = np.meshgrid(x, x)
-    points = np.stack((xx, yy),axis=-1).reshape(-1, 2)
+    points = np.stack((xx, yy), axis=-1).reshape(-1, 2)
     c = np.cos(ang)
     s = np.sin(ang)
     R = np.array([[c, -s], [s, c]])
-    points_r = np.dot(R, points.T).T+t[:2]
-    bools = mask.is_on_mask(points_r[:,0].ravel(), points_r[:,1].ravel())
+    points_r = np.dot(R, points.T).T + t[:2]
+    bools = mask.is_on_mask(points_r[:, 0].ravel(), points_r[:, 1].ravel())
     return bools.reshape(xx.shape)
+
 
 def create_scene_split_indices(nusc, train=0.8, val=0.1):
     scene_inds = np.arange(len(nusc.scene))
@@ -428,12 +441,13 @@ def create_scene_split_indices(nusc, train=0.8, val=0.1):
 
     train_inds = scene_inds[:n_train]
     val_inds = scene_inds[n_train:n_train + n_val]
-    test_inds = scene_inds[n_train+n_val:]
+    test_inds = scene_inds[n_train + n_val:]
 
-    assert(train_inds.size == n_train)
-    assert(val_inds.size == n_val)
-    assert(test_inds.size == n_test)
+    assert (train_inds.size == n_train)
+    assert (val_inds.size == n_val)
+    assert (test_inds.size == n_test)
     return train_inds, val_inds, test_inds
+
 
 def create_preprocessed_dataset(output_dir,
                                 disjoint_scenes=True,
@@ -448,26 +462,26 @@ def create_preprocessed_dataset(output_dir,
                                 n_max=int(1e8),
                                 shuffle=False,
                                 dry=True):
-    assert(not os.path.isdir(output_dir))
+    assert (not os.path.isdir(output_dir))
     os.mkdir(output_dir)
     log.info("Creating new nuscenes dataset at {}".format(output_dir))
     offsets = sorted(offsets)
-    
+
     nusc = nuscenes_module.NuScenes(version=version, dataroot=dataroot, verbose=True)
     have_val_scene_idx = val_scene_idx is not None
     if official_splits:
         log.info("Using official trainval splits to create train, val, test data")
-        assert(disjoint_scenes)
+        assert (disjoint_scenes)
         train_scenes = precog.ext.nuscenes.utils.splits.train
         val_and_test_scenes = precog.ext.nuscenes.utils.splits.val
         Nval = len(val_and_test_scenes)
-        val_scenes, test_scenes = val_and_test_scenes[:Nval//2], val_and_test_scenes[Nval//2:]
+        val_scenes, test_scenes = val_and_test_scenes[:Nval // 2], val_and_test_scenes[Nval // 2:]
         train_scene_inds = [nusc.scene_name_to_scene_idx[_] for _ in train_scenes]
         val_scene_inds = [nusc.scene_name_to_scene_idx[_] for _ in val_scenes]
         test_scene_inds = [nusc.scene_name_to_scene_idx[_] for _ in test_scenes]
     elif have_val_scene_idx:
-        assert(disjoint_scenes)
-        assert(not official_splits)
+        assert (disjoint_scenes)
+        assert (not official_splits)
         if 'mini' in dataroot:
             val_scene_name = precog.ext.nuscenes.utils.splits.mini_val[int(val_scene_idx)]
         else:
@@ -491,20 +505,22 @@ def create_preprocessed_dataset(output_dir,
                     'val_scenes': val_scenes,
                     'test_scenes': test_scenes}
 
-    log.info("Have {} train, {} val, and {} test scenes".format(len(train_scene_inds), len(val_scene_inds), len(test_scene_inds)))
+    log.info("Have {} train, {} val, and {} test scenes".format(len(train_scene_inds), len(val_scene_inds),
+                                                                len(test_scene_inds)))
 
     os.mkdir(output_dir + '/train/')
     os.mkdir(output_dir + '/val/')
     os.mkdir(output_dir + '/test/')
 
     def scene_to_sample_tokens(scene):
-        samples = nuscenes_module.traverse_linked_list(nusc, nusc.get('sample', scene['first_sample_token']), 'sample', 'next', inclusive=True)
+        samples = nuscenes_module.traverse_linked_list(nusc, nusc.get('sample', scene['first_sample_token']), 'sample',
+                                                       'next', inclusive=True)
         return [_['token'] for _ in samples]
 
     train_sample_tokens = []
     val_sample_tokens = []
     test_sample_tokens = []
-    
+
     for ti in train_scene_inds:
         train_sample_tokens.extend(scene_to_sample_tokens(nusc.scene[ti]))
     for vi in val_scene_inds:
@@ -513,13 +529,13 @@ def create_preprocessed_dataset(output_dir,
         test_sample_tokens.extend(scene_to_sample_tokens(nusc.scene[tei]))
 
     if not disjoint_scenes:
-        assert(not have_val_scene_idx)
+        assert (not have_val_scene_idx)
         tr_orig = copy.copy(train_sample_tokens)
         va_orig = copy.copy(val_sample_tokens)
         te_orig = copy.copy(test_sample_tokens)
         log.info("Not using disjoint scenes")
-        
-        assert(not official_splits)
+
+        assert (not official_splits)
         all_tokens = train_sample_tokens + val_sample_tokens + test_sample_tokens
         if shuffle:
             log.info("Shuffling sample tokens")
@@ -534,25 +550,27 @@ def create_preprocessed_dataset(output_dir,
         del train_sample_tokens, val_sample_tokens, test_sample_tokens
         train_sample_tokens = all_tokens[:n_train]
         val_sample_tokens = all_tokens[n_train:n_train + n_val]
-        test_sample_tokens = all_tokens[n_train+n_val:]
-        assert(len(test_sample_tokens) == n_test)
-        assert(len(val_sample_tokens) == n_val)
-        assert(len(train_sample_tokens) == n_train)
+        test_sample_tokens = all_tokens[n_train + n_val:]
+        assert (len(test_sample_tokens) == n_test)
+        assert (len(val_sample_tokens) == n_val)
+        assert (len(train_sample_tokens) == n_train)
         tr = set(train_sample_tokens)
         va = set(val_sample_tokens)
         te = set(test_sample_tokens)
-        assert(len(tr & va) == 0)
-        assert(len(tr & te) == 0)
-        assert(len(va & te) == 0)
-        assert(tr | va | te == set(all_tokens))
+        assert (len(tr & va) == 0)
+        assert (len(tr & te) == 0)
+        assert (len(va & te) == 0)
+        assert (tr | va | te == set(all_tokens))
 
     # Instantiate the config.
     cfg = NuscenesConfig()
     # Set the number of agents we'll require.
     cfg.min_relevant_agents = min_A_total - 1
-    
-    with open(output_dir + '/scene_splits.dill', 'wb') as f: dill.dump(scene_splits, f)
-    with open(output_dir + '/nuscenes_config.dill', 'wb') as f: dill.dump(cfg, f)
+
+    with open(output_dir + '/scene_splits.dill', 'wb') as f:
+        dill.dump(scene_splits, f)
+    with open(output_dir + '/nuscenes_config.dill', 'wb') as f:
+        dill.dump(cfg, f)
 
     log.info("Preprocessing train")
     cnt = 0
@@ -560,37 +578,46 @@ def create_preprocessed_dataset(output_dir,
     for tok in tqdm.tqdm(train_sample_tokens[:n_max]):
         for offset in offsets:
             datum = NuscenesMultiagentDatum.from_nuscenes_sample(nusc, nusc.get('sample', tok), cfg=cfg, offset=offset)
-            if datum in (None, -1): continue
-            elif datum == 1: break
-            else: pass
-                
+            if datum in (None, -1):
+                continue
+            elif datum == 1:
+                break
+            else:
+                pass
+
             train_scene_tokens.append(datum.metadata['scene_token'])
             if not dry:
                 with open(output_dir + '/train/ma_datum_{:06d}.dill'.format(cnt), 'wb') as f: dill.dump(datum, f)
             cnt += 1
 
-    log.info("Preprocessing val")        
+    log.info("Preprocessing val")
     cnt = 0
     for tok in tqdm.tqdm(val_sample_tokens[:n_max]):
         for offset in offsets:
             datum = NuscenesMultiagentDatum.from_nuscenes_sample(nusc, nusc.get('sample', tok), cfg=cfg, offset=offset)
-            if datum in (None, -1): continue
-            elif datum == 1: break
-            else: pass
-                
+            if datum in (None, -1):
+                continue
+            elif datum == 1:
+                break
+            else:
+                pass
+
             val_scene_tokens.append(datum.metadata['scene_token'])
             if not dry:
                 with open(output_dir + '/val/ma_datum_{:06d}.dill'.format(cnt), 'wb') as f: dill.dump(datum, f)
             cnt += 1
 
-    log.info("Preprocessing test")                
+    log.info("Preprocessing test")
     cnt = 0
     for tok in tqdm.tqdm(test_sample_tokens[:n_max]):
         for offset in offsets:
             datum = NuscenesMultiagentDatum.from_nuscenes_sample(nusc, nusc.get('sample', tok), cfg=cfg, offset=offset)
-            if datum in (None, -1): continue
-            elif datum == 1: break
-            else: pass
+            if datum in (None, -1):
+                continue
+            elif datum == 1:
+                break
+            else:
+                pass
             test_scene_tokens.append(datum.metadata['scene_token'])
             if not dry:
                 with open(output_dir + '/test/ma_datum_{:06d}.dill'.format(cnt), 'wb') as f: dill.dump(datum, f)
@@ -601,22 +628,22 @@ def create_preprocessed_dataset(output_dir,
     te = set(test_scene_tokens)
     if disjoint_scenes:
         # Ensure scenes disjoint.
-        assert(len(tr & va) == 0)
-        assert(len(tr & te) == 0)
-        assert(len(va & te) == 0)
+        assert (len(tr & va) == 0)
+        assert (len(tr & te) == 0)
+        assert (len(va & te) == 0)
     else:
         # Ensure scene overlap between each set.
-        assert(len(tr & va) > 0)
-        assert(len(tr & te) > 0)
-        assert(len(va & te) > 0)
+        assert (len(tr & va) > 0)
+        assert (len(tr & te) > 0)
+        assert (len(va & te) > 0)
 
 
 @hydra.main(config_path='./preprocess_nuscenes_conf.yaml')
 def main(cfg):
-    assert(len(cfg.output_dir) > 0)
+    assert (len(cfg.output_dir) > 0)
     np.random.seed(cfg.seed)
     random.seed(cfg.seed)
-    assert(0.0 <= min(cfg.offsets) <= max(cfg.offsets) < 0.5)
+    assert (0.0 <= min(cfg.offsets) <= max(cfg.offsets) < 0.5)
     create_preprocessed_dataset(cfg.output_dir,
                                 official_splits=cfg.official_splits,
                                 disjoint_scenes=cfg.disjoint_scenes,
@@ -629,6 +656,7 @@ def main(cfg):
                                 val=cfg.val,
                                 dry=cfg.dry,
                                 n_max=cfg.n_max)
+
 
 if __name__ == '__main__':
     main()

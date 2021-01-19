@@ -1,8 +1,8 @@
-
 import numpy as np
 import tensorflow as tf
 
 import precog.interface as interface
+
 
 def nuscenes_dill_metadata_producer(data):
     items = interface.MetadataList()
@@ -12,6 +12,7 @@ def nuscenes_dill_metadata_producer(data):
     # items.append(interface.MetadataItem(name='scene_token', array=scene_tokens, dtype=tf.string)) 
     return items
 
+
 def nuscenes_mini_dill_metadata_producer(data):
     items = interface.MetadataList()
     sample_tokens = np.asarray([_.metadata['sample_token'] for _ in data])
@@ -20,18 +21,26 @@ def nuscenes_mini_dill_metadata_producer(data):
     # items.append(interface.MetadataItem(name='scene_token', array=scene_tokens, dtype=tf.string)) 
     return items
 
+
 def carla_town01_A5_T20_metadata_producer(data):
     return interface.MetadataList()
+
 
 def carla_town01_A1_T20_metadata_producer(data):
     return interface.MetadataList()
 
+
 def carla_town01_A1_T20_lightstate_metadata_producer(data):
     return interface.MetadataList()
 
+
 PRODUCERS = {
     "trimodal_dataset": lambda *args, **kwargs: interface.MetadataList(),
+    'ind_heckstrasse_dill': lambda *args, **kwargs: interface.MetadataList(),
+    'ind_bendplatz_dill': lambda *args, **kwargs: interface.MetadataList(),
+    'ind_frankenberg_dill': lambda *args, **kwargs: interface.MetadataList(),
     'nuscenes_shuffle_A5_dill': nuscenes_dill_metadata_producer,
+    'nuscenes_mini_dill': nuscenes_mini_dill_metadata_producer,
     'carla_town01_A5_T20_json': carla_town01_A5_T20_metadata_producer,
     'carla_town01_A1_T20_json': carla_town01_A1_T20_metadata_producer,
     'carla_town01_A1_T20_lightstate_json': carla_town01_A1_T20_lightstate_metadata_producer,

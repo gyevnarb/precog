@@ -13,9 +13,8 @@ hydra:
       file:
         level: DEBUG
   run:
-    # dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}_${dataset.class}_${bijection.class}
-    # dir: /home/nrhinehart/data/esp_train_results/${now:%Y-%m}/${now:%m-%d-%H-%M-%S}_${dataset.params._name}_${bijection.class}_${main.tag}
-    dir: /global/scratch/nrhinehart/data/esp_train_results/${now:%Y-%m}/${now:%m-%d-%H-%M-%S}_${dataset.params._name}_${bijection.class}_${main.tag}
+     dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}_${dataset.class}_${bijection.class}
+
 distribution:
   params:
     K: 12
@@ -23,7 +22,7 @@ distribution:
 
 bijection:
   params:
-    A: 1
+    A: 5
 
 dataset:
   plot_allchannel: false
@@ -31,7 +30,7 @@ dataset:
 defaults:
   - hardware: shared_gpu  
   - optimizer: sgd_optimizer
-  - dataset: trimodal_dataset
+  - dataset: ind_heckstrasse
   - bijection: social_convrnn
   - distribution: bijective_distribution
   - objective: forward_kl

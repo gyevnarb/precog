@@ -191,7 +191,7 @@ class SerializedDataset(interface.ESPDataset, minibatched_dataset.MinibatchedDat
         # (B, H, W, C), right-handed overhead view.
         if self.load_bev:
             bevs = np.stack([k(_, 'overhead_features') for _ in data], 0)
-            bevs = npu.batch_center_crop(bevs, target_h=self.W, target_w=self.W)
+            # bevs = npu.batch_center_crop(bevs, target_h=self.W, target_w=self.W)
 
         # TODO SDT-ification for CARLA should be handled at data creation time, not loading time.            
         if self.sdt_bev:

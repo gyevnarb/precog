@@ -1,4 +1,3 @@
-
 import atexit
 import hydra
 import logging
@@ -19,12 +18,16 @@ log = logging.getLogger(__file__)
 
 np.set_printoptions(precision=10, suppress=True)
 
+
 @hydra.main(config_path='conf/esp_train_config.yaml')
-def main(cfg): optimize(prepare_for_optimization(cfg))
+def main(cfg):
+    optimize(prepare_for_optimization(cfg))
+
 
 def optimize(opt):
     # Fit the distribution according to the objective on the dataset.
     with tf.contrib.summary.always_record_summaries(): opt.optimize()
+
 
 def prepare_for_optimization(cfg):
     # Log info about the program state.
@@ -33,7 +36,7 @@ def prepare_for_optimization(cfg):
     log.info("\n\nConfig:\n===\n{}".format(cfg.pretty()))
     log.info("Sha: {}. Dirty: {}".format(*logu.get_sha_and_dirty()))
     # Grab a reference to the output directory (automatically created).
-    output_directory = os.path.realpath(os.getcwd())    
+    output_directory = os.path.realpath(os.getcwd())
     log.info("Output directory: {}".format(output_directory))
     # Seed the RNG.
     randu.seed(cfg.main.seed)
@@ -46,6 +49,7 @@ def prepare_for_optimization(cfg):
     # Create optimizer.
     opt = instantiate_optimizer(cfg, writer=writer, output_directory=output_directory, sess=sess)
     return opt
+
 
 def instantiate_session(cfg):
     if cfg.main.eager:
@@ -61,8 +65,10 @@ def instantiate_session(cfg):
         log.info("Running in static mode")
         # Create the session now because it spits out lots of clutter.
         sess = tfutil.create_session(
-            allow_growth=cfg.hardware.allow_growth, per_process_gpu_memory_fraction=cfg.hardware.per_process_gpu_memory_fraction)
+            allow_growth=cfg.hardware.allow_growth,
+            per_process_gpu_memory_fraction=cfg.hardware.per_process_gpu_memory_fraction)
     return sess
+
 
 def instantiate_writer(cfg, output_directory):
     # Intantiate the tensorboard writer.
@@ -72,6 +78,7 @@ def instantiate_writer(cfg, output_directory):
     else:
         writer = tf.compat.v1.summary.FileWriter(logdir=output_directory, flush_secs=5, max_queue=1)
     return writer
+
 
 def instantiate_optimizer(cfg, writer, output_directory, sess):
     # Instantiate the parameterized bijection.
@@ -94,7 +101,7 @@ def instantiate_optimizer(cfg, writer, output_directory, sess):
     dataset = hydra.utils.instantiate(cfg.dataset, **cfg.dataset.params)
 
     assert dataset.max_A >= bijection.A, "Dataset's A is less than bijection's A!"
-    
+
     # Instantiate the optimizer
     opt = sgd_optimizer.SGDOptimizer(model_distribution=model_distribution,
                                      data_distribution_proxy=data_distribution_proxy,
@@ -108,6 +115,7 @@ def instantiate_optimizer(cfg, writer, output_directory, sess):
                                      **cfg.optimizer.params)
     return opt
 
+
 def query_purge_directory_and_writer(directory, writer):
     """
 
@@ -120,5 +128,6 @@ def query_purge_directory_and_writer(directory, writer):
     writer.close()
     import utils.log_util as logu
     logu.query_purge_directory(directory)
+
 
 if __name__ == '__main__': main()

@@ -1,9 +1,9 @@
-output_dir: ''
+output_dir: '/home/balint/Documents/precog/data/nuscenes_results_test/'
 seed: 42
-A: 5
-version: 'v1.0-trainval'
-dataroot: '/home/nrhinehart/data/datasets/nuscenes_raw/'
-official_splits: true
+A: 2
+version: 'v1.0-mini'
+dataroot: '/home/balint/Documents/precog/data/nuscenes_raw/'
+official_splits: false
 disjoint_scenes: true
 dry: 0
 offsets: [0.0]
@@ -22,5 +22,5 @@ hydra:
       file:
         level: DEBUG
   run:
-    dir: /home/nrhinehart/data/preprocess_nuscenes_results/${now:%Y-%m}/${now:%m-%d-%H-%M-%S}
+    dir: /home/balint/Documents/precog/data/preprocess_nuscenes_results/${now:%Y-%m}/${now:%m-%d-%H-%M-%S}
 
