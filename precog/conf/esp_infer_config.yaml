@@ -1,10 +1,11 @@
 main:
+  ind: true
   debug_bijection: false
   compute_metrics: true
   plot: true
 
 model:
-  directory: '/home/balint/Documents/precog/output/esp_train_results/2021-01/01-19-17-22-18_ind_heckstrasse_precog.bijection.social_convrnn.SocialConvRNN_'
+  directory: '/home/balint/Documents/precog/output/esp_train_results/2021-01/01-23-20-08-33_ind_heckstrasse_precog.bijection.social_convrnn.SocialConvRNN_'
 
 hardware:
   allow_growth: true

@@ -34,9 +34,20 @@ def carla_town01_A1_T20_lightstate_metadata_producer(data):
     return interface.MetadataList()
 
 
+def ind_heckstrasse_metadata_producer(data):
+    items = interface.MetadataList()
+
+    vis_layer = np.asarray([data[i].metadata["vis_layer"] for i in range(len(data))])
+    items.append(interface.MetadataItem(name='vis_layer', array=vis_layer, dtype=np.int32))
+
+    vis_scale = np.asarray([data[i].metadata["vis_scale"] for i in range((len(data)))])
+    items.append(interface.MetadataItem(name="vis_scale", array=vis_scale, dtype=np.float64))
+    return items
+
+
 PRODUCERS = {
     "trimodal_dataset": lambda *args, **kwargs: interface.MetadataList(),
-    'ind_heckstrasse_dill': lambda *args, **kwargs: interface.MetadataList(),
+    'ind_heckstrasse_dill': ind_heckstrasse_metadata_producer,
     'ind_bendplatz_dill': lambda *args, **kwargs: interface.MetadataList(),
     'ind_frankenberg_dill': lambda *args, **kwargs: interface.MetadataList(),
     'nuscenes_shuffle_A5_dill': nuscenes_dill_metadata_producer,
