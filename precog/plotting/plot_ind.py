@@ -19,14 +19,14 @@ from .plot import plot_figure
 
 
 @logu.log_wrapd()
-def plot_sample(sampled_output, expert=None, b=0, figsize=(4, 4), partial_write_np_image_to_tb=None, bev_kwargs={}):
+def plot_sample(S, S_past, b=0, figsize=(4, 4), partial_write_np_image_to_tb=None, bev_kwargs={}):
     fig, ax = plt.subplots(1, 1, figsize=figsize)
 
     vis_layer = bev_kwargs["vis_layer"][b]
     vis_scale = bev_kwargs["vis_scale"][b]
     limit = [0, vis_layer.shape[1], vis_layer.shape[0], 0]
 
-    plot_single_sampled_output(sampled_output, batch_index=b, fig=fig, ax=ax,
+    plot_single_sampled_output(S, S_past, batch_index=b, fig=fig, ax=ax,
                                scale=vis_scale, limit=limit)
     ax.imshow(vis_layer, cmap='gray', vmin=0, vmax=255)
 
@@ -36,12 +36,8 @@ def plot_sample(sampled_output, expert=None, b=0, figsize=(4, 4), partial_write_
     return res
 
 
-def plot_single_sampled_output(sampled_output, batch_index, fig, ax, scale, limit):
-    S = sampled_output.rollout.S_world_frame
-    S_past = sampled_output.phi.S_past_world_frame
+def plot_single_sampled_output(S, S_past, batch_index, fig, ax, scale, limit):
     live_agents = [i for i, traj in enumerate(S_past[batch_index]) if not np.allclose(traj, 0.0)]
-
-
 
     # Plot past.
     plot_joint_trajectory(S_past[batch_index][None], fig=fig, ax=ax, scale=scale, agents=live_agents,
@@ -69,9 +65,9 @@ def plot_joint_trajectory(joint_traj, limit, scale=1, agents=None, fig=None, ax=
             color = cm.get_cmap("tab10").colors[a]
 
         if isinstance(joint_traj, tf.Tensor):
-            single_traj = joint_traj[:, a].numpy()
+            single_traj = joint_traj[:, a].numpy().copy()
         else:
-            single_traj = joint_traj[:, a]
+            single_traj = joint_traj[:, a].copy()
 
         if scale > 0:
             single_traj *= scale

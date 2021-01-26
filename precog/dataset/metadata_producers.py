@@ -42,6 +42,10 @@ def ind_heckstrasse_metadata_producer(data):
 
     vis_scale = np.asarray([data[i].metadata["vis_scale"] for i in range((len(data)))])
     items.append(interface.MetadataItem(name="vis_scale", array=vis_scale, dtype=np.float64))
+
+    agent_dims = [data[i].metadata["agent_dims"] for i in range(len(data))]
+    items.append(interface.MetadataItem(name="agent_dims", array=agent_dims, dtype=None))
+
     return items
 
 

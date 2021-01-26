@@ -99,7 +99,8 @@ class SerializedDataset(interface.ESPDataset, minibatched_dataset.MinibatchedDat
         return self.T
 
     @logu.log_wrapd()
-    def get_minibatch(self, is_training, split='train', mb_idx=None, input_singleton=None, return_metadata=False,
+    def get_minibatch(self, is_training, split='train', mb_idx=None, input_singleton=None,
+                      return_metadata=False, data_feed=None,
                       *args, **kwargs):
         if mb_idx is None:
             # Use the minibatch tracker to get the current minibatch index for the split
@@ -117,7 +118,10 @@ class SerializedDataset(interface.ESPDataset, minibatched_dataset.MinibatchedDat
 
         k = lambda _, _k: getattr(_, self.keyremap[_k])
 
-        data = self._fetch_minibatch(mb_idx, split)
+        if data_feed is None:
+            data = self._fetch_minibatch(mb_idx, split)
+        else:
+            data = data_feed
 
         # (1, B, T, d)
         player_experts = np.stack([np.asarray(k(_, 'player_future')) for _ in data], 0)[None]

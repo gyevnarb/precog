@@ -5,8 +5,6 @@ from typing import List
 import numpy as np
 import cv2 as cv
 import os
-
-from lanelet2.core import Lanelet
 from shapely.geometry import LineString
 
 
@@ -18,8 +16,15 @@ def collapse(arr):
     return ret
 
 
+def rotate(image, angle):
+    image_center = tuple(np.array(image.shape[1::-1]) / 2)
+    rot_mat = cv.getRotationMatrix2D(image_center, angle, 1.0)
+    result = cv.warpAffine(image, rot_mat, image.shape[1::-1], flags=cv.INTER_CUBIC, borderValue=255)
+    return result
+
+
 class InDConfig:
-    def __init__(self, scenario, recordings_meta, draw_map = False):
+    def __init__(self, scenario, recordings_meta, draw_map=False):
         self.recordings_meta = recordings_meta
         self.draw_map = draw_map
 
@@ -28,14 +33,15 @@ class InDConfig:
 
     def _create_config(self):
         self.frame_rate = self.recordings_meta["frameRate"]  # Hz
+        self.inv_frame_rate = 1 / self.frame_rate
 
         # samples are at 2Hz in the original Precog implementation
         self.sample_period = 2  # Hz
         self.sample_frequency = 1. / self.sample_period
 
-        # Predict 4 seconds in the future with 1 second of past.
-        self.past_horizon_seconds = 1  # Tp
-        self.future_horizon_seconds = 2  # Tf
+        # Predict 2 seconds in the future with 2 seconds of past.
+        self.past_horizon_seconds = 2  # Tp
+        self.future_horizon_seconds = 3  # Tf
 
         # The number of samples we need.
         self.future_horizon_length = int(round(self.future_horizon_seconds * self.frame_rate))
@@ -46,8 +52,8 @@ class InDConfig:
         # There is no dedicated ego vehicle
         self.min_relevant_agents = 1  # A
 
-        # Image features to include in overhead features
-        self.image_features = ["surfaces", "markings", "agents"]
+        self.downsample_factor = 1 / 3.5
+        self.image_dims = (900, 700)
 
         self.vehicle_colors = {
             "car": 0,
@@ -70,15 +76,13 @@ class InDConfig:
         # Space between dashed markings and length of dashes in metres
         self.dash_space = 2
         self.marking_length = 2
-        self.marking_color = 240
         self.arrow_thickness = 2
         self.marking_thickness = 1
+        self.marking_color = 240
 
-        #  Configuration for temporal interpolation.
-        # For InD usually this is not necessary as the frame rate of the recording is high
-        # but the sample rate is low
-        self.target_sample_period_past = 5
-        self.target_sample_period_future = 5
+        # Configuration for temporal interpolation.
+        self.target_sample_period_past = 10
+        self.target_sample_period_future = 10
         self.target_sample_frequency_past = 1. / self.target_sample_period_past
         self.target_sample_frequency_future = 1. / self.target_sample_period_future
         self.target_past_horizon = self.past_horizon_seconds * self.target_sample_period_past
@@ -111,7 +115,7 @@ class InDConfig:
 
         def draw_surface(elem):
             if "subtype" in elem.attributes:
-                polygon = elem.polygon2d() if isinstance(elem, Lanelet) else elem.outerBoundPolygon()
+                polygon = elem.polygon2d() if hasattr(elem, "polygon2d") else elem.outerBoundPolygon()
                 points = [[int(scale * pt.x), int(-scale * pt.y)] for pt in polygon]
                 if points and elem.attributes["subtype"] in layer_keys:
                     subtype = elem.attributes["subtype"]
@@ -214,9 +218,9 @@ class InDMultiagentDatum:
     def from_ind_trajectory(cls, agents_to_include: List[int], episode, scenario,
                             reference_frame: int, cfg: InDConfig):
         # There is no explicit ego in the InD dataset
-        player_past = []
-        player_future = []
-        player_yaw = None
+        player_past = np.zeros((cfg.target_past_horizon, 3))
+        player_future = np.zeros((cfg.target_future_horizon, 3))
+        player_yaw = 0.0
 
         all_agent_pasts = []
         all_agent_futures = []
@@ -228,17 +232,26 @@ class InDMultiagentDatum:
             agent = episode.agents[agent_id]
             local_frame = reference_frame - agent.initial_frame
 
+            # Interpolate for past trajectory
             agent_past_trajectory = agent.state_history[local_frame - cfg.past_horizon_length:local_frame]
-            all_agent_pasts.append([[frame.x, frame.y, 0.0] for frame in agent_past_trajectory])
+            past_timestamps = -np.arange(0, cfg.past_horizon_seconds, cfg.inv_frame_rate)[::-1]
+            agent_past_interpolated = InDMultiagentDatum.interpolate_trajectory(agent_past_trajectory,
+                                                                                cfg.target_past_times,
+                                                                                past_timestamps)
+            all_agent_pasts.append(agent_past_interpolated)
 
+            # Interpolation for future trajectory
             agent_future_trajectory = agent.state_history[local_frame:local_frame + cfg.future_horizon_length]
-            all_agent_futures.append([[frame.x, frame.y, 0.0] for frame in agent_future_trajectory])
+            future_timestamps = np.arange(cfg.future_horizon_seconds, 0.0, -cfg.inv_frame_rate)[::-1]
+            agent_future_interpolated = InDMultiagentDatum.interpolate_trajectory(agent_future_trajectory,
+                                                                                  cfg.target_future_times,
+                                                                                  future_timestamps)
+            all_agent_futures.append(agent_future_interpolated)
 
-            all_agent_yaws.append(agent.state_history[local_frame].heading)
+            all_agent_yaws.append(agent.state_history[local_frame - 1].heading)
 
             agent_dims.append([agent.width, agent.length, agent.agent_type])
 
-        # TODO: Use UTM coordinate frame instead?
         # (A, Tp, d). Agent past trajectories in local frame at t=now
         agent_pasts = np.stack(all_agent_pasts, axis=0)
         # (A, Tf, d). Agent future trajectories in local frame at t=now
@@ -247,11 +260,15 @@ class InDMultiagentDatum:
         agent_yaws = np.asarray(all_agent_yaws)
 
         assert agent_pasts.shape[0] == agent_futures.shape[0] == agent_yaws.shape[0] == len(agents_to_include)
+        assert agent_pasts.shape[1] == cfg.target_past_horizon
+        assert agent_futures.shape[1] == cfg.target_future_horizon
 
-        overhead_features = InDMultiagentDatum.get_image_features(
+        overhead_features, visualisation = InDMultiagentDatum.get_image_features(
             scenario, agent_pasts[:, -1, :], agent_yaws, agent_dims, cfg)
 
-        metadata = {}
+        metadata = {"vis_layer": visualisation,
+                    "vis_scale": cfg.downsample_factor / scenario.config.background_px_to_meter,
+                    "agent_dims": agent_dims}
 
         return cls(player_past, agent_pasts,
                    player_future, agent_futures,
@@ -265,24 +282,24 @@ class InDMultiagentDatum:
         agents_layer = InDMultiagentDatum.get_agent_boxes(scenario, agent_poses, agent_yaws, agent_dims, cfg)
         features_list.append(agents_layer)
 
+        features_list = [cv.resize(layer[:cfg.image_dims[1], :cfg.image_dims[0]], (0, 0),
+                                   fx=cfg.downsample_factor, fy=cfg.downsample_factor, interpolation=cv.INTER_AREA)
+                         for layer in features_list]
         image = np.stack(features_list, axis=-1)
-        image = image[:708, :905, :]  # Trim image to smallest of all scenarios
 
+        visualisation = collapse(image).copy()
         if cfg.draw_map:
-            path_to_viz = f"precog/{scenario.config.name}/map_viz/"
+            path_to_viz = get_data_dir() + f"precog/{scenario.config.name}/map_viz/"
             if not os.path.exists(path_to_viz):
                 os.mkdir(path_to_viz)
-            cv.imwrite(os.path.join(path_to_viz, f"{cls.t}.png"), collapse(image))
+            cv.imwrite(os.path.join(path_to_viz, f"{cls.t}.png"), visualisation)
             cls.t += 1
 
         # Turn image to "binary"
         mask = image != 255
         image[mask] = 0
 
-        # for i, l in enumerate(image.transpose((-1, 0, 1))):
-        #     cv.imwrite(get_data_dir() + f"precog/{i}_feature.png", l)
-
-        return image
+        return image, visualisation
 
     @staticmethod
     def get_agent_boxes(scenario, agent_poses, agent_yaws, agent_dims, cfg):
@@ -296,6 +313,61 @@ class InDMultiagentDatum:
             color = cfg.vehicle_colors[agent_dim[2]]
             cv.fillPoly(layer, [agent_box], color, cv.LINE_AA)
         return layer
+
+    @staticmethod
+    def interpolate_trajectory(trajectory, target_timestamps, timestamps):
+        poses = np.array([[frame.x, frame.y, 0.0] for frame in trajectory])
+        ret = []
+        for axis in poses.T:
+            interp = np.interp(target_timestamps, timestamps, axis)
+            ret.append(interp)
+        return np.array(ret).T
+
+    @classmethod
+    def from_precog_predictions(cls, cfg, S, S_past, overhead_features, metadata):
+        """ Returns a list with K elements where each element is a list of length B """
+        T_past = cfg.dataset.params.T_past
+        T_future = cfg.dataset.params.T
+        D = S.shape[-1]
+
+        player_past = np.zeros((T_past, D))
+        player_future = np.zeros((T_future, D))
+        player_yaw = 0.0
+
+        data = []
+        for s in range(S.shape[1]):
+            samples = []
+            for b in range(S.shape[0]):
+                live_agents = [i for i, traj in enumerate(S_past[b]) if not np.allclose(traj, 0.0)]
+                vis_scale = metadata["vis_scale"][b]
+                h, w = overhead_features.shape[1:3]
+
+                agent_pasts = S[b, s, live_agents, :T_past, :]  # The predicted future becomes the past, (A, Tp, D)
+                agent_futures = np.zeros((len(live_agents), T_future, D))
+                diffs = np.diff(agent_pasts, axis=1)
+                agent_yaws = np.arctan2(diffs[..., 1], diffs[..., 0])[..., -1]
+                agent_dims = metadata["agent_dims"][b]
+
+                feature_list = overhead_features[b, ..., :-1]
+                agents_layer = np.full((h, w), 255, np.uint8)
+                for i in range(agent_pasts.shape[0]):
+                    agent_dim = agent_dims[i]
+                    agent_box = Box(agent_pasts[i, -1],
+                                    agent_dim[0], agent_dim[1], agent_yaws[i]).get_display_box(vis_scale)
+                    agent_box = agent_box.reshape((-1, 1, 2))
+                    cv.fillPoly(agents_layer, [agent_box], 0, cv.LINE_AA)
+                image = np.append(feature_list, agents_layer[..., np.newaxis], axis=-1)
+                mask = image != 255
+                image[mask] = 0
+
+                datum = cls(player_past, agent_pasts,
+                            player_future, agent_futures,
+                            player_yaw, agent_yaws,
+                            image, dict([(k, None) for k in metadata.keys()]))
+
+                samples.append(datum)
+            data.append(samples)
+        return data
 
 
 class Box:
@@ -320,7 +392,11 @@ class Box:
         return self.center + box @ rotation.T
 
     def get_display_box(self, scenario):
-        scale = 1.0 / scenario.config.background_px_to_meter
+        if isinstance(scenario, float):
+            scale = scenario
+        else:
+            scale = 1.0 / scenario.config.background_px_to_meter
+
         permuter = np.array(  # Need to permute vertices for display
             [[1, 0, 0, 0],
              [0, 1, 0, 0],
@@ -329,3 +405,66 @@ class Box:
         )
 
         return permuter @ (scale * np.abs(self.bounding_box)).astype(np.int32)
+
+
+class GoalDetector:
+    """ Detects the goals of agents based on their trajectories"""
+
+    def __init__(self, possible_goals, dist_threshold=1.5):
+        self.dist_threshold = dist_threshold
+        self.possible_goals = possible_goals
+
+    def detect_goals(self, frames):
+        goals = []
+        goal_frames = []
+        for frame in frames:
+            agent_point = np.array([frame.x, frame.y])
+
+            for goal_idx, goal_point in enumerate(self.possible_goals):
+                dist = np.linalg.norm(agent_point - goal_point)
+                if dist <= self.dist_threshold and goal_idx not in goals:
+                    goals.append(goal_idx)
+                    goal_frames.append(frame.frame_id)
+        return goals, goal_frames
+
+    def detect_goals_precog(self, trajectory):
+        goals = []
+        for goal_idx, goal_point in enumerate(self.possible_goals):
+            distance = np.linalg.norm(trajectory - np.array(goal_point), axis=1)
+            close_points = np.argwhere(distance < self.dist_threshold)
+            if len(close_points) > 0:
+                goals.append(goal_idx)
+        return goals
+
+    def get_agents_goals_ind(self, tracks, static_info, meta_info, map_meta, agent_class='car'):
+        goal_locations = map_meta.goals
+        agent_goals = {}
+        for track_idx in range(len(static_info)):
+            if static_info[track_idx]['class'] == agent_class:
+                track = tracks[track_idx]
+                agent_goals[track_idx] = []
+
+                for i in range(static_info[track_idx]['numFrames']):
+                    point = np.array([track['xCenter'][i], track['yCenter'][i]])
+                    for goal_idx, loc in enumerate(goal_locations):
+                        dist = np.linalg.norm(point - loc)
+                        if dist < self.dist_threshold and loc not in agent_goals[track_idx]:
+                            agent_goals[track_idx].append(loc)
+        return agent_goals
+
+    @classmethod
+    def update_precog_completion(cls, goal_completion, cfg, S, S_past):
+        goal_detector = cls(cfg.goal_detection.goals, cfg.goal_detection.threshold)
+        B, K, A, Tf, D = S.shape
+
+        for b in [i for i, b in enumerate(goal_completion) if len(b) == 0]:
+            live_agents = [i for i, traj in enumerate(S_past[b]) if not np.allclose(traj, 0.0)]
+            sections = []
+            for a in live_agents:
+                for s in range(K):
+                    single_traj = S[b, s, a]
+                    goals = goal_detector.detect_goals_precog(single_traj)
+                    if len(goals) > 0:
+                        sections.append({"section": b, "agent": a, "sample": s, "goals": goals})
+            goal_completion[b].extend(sections)
+        return len([i for i, b in enumerate(goal_completion) if len(b) == 0]) == 0

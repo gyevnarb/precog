@@ -5,8 +5,8 @@ dataset:
     root_path: /home/balint/Documents/precog/data/ind_heckstrasse
     _max_A: 5
     B: 10
-    T: 50
-    T_past: 50
+    T: 30
+    T_past: 20
     load_bev: True
     feature_pixels_per_meter: 10.23
     fmt: 'dill'
