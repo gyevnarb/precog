@@ -6,12 +6,12 @@ main:
   plot: true
 
 goal_detection:
-  try_count: 10
+  try_count: 3
   threshold: 2.5
   goals: [[ 17.40, -4.97 ], [ 75.18, -56.65 ], [ 62.47, -17.54 ]]
 
 model:
-  directory: '/home/balint/Documents/precog/output/esp_train_results/2021-01/01-23-20-08-33_ind_heckstrasse_precog.bijection.social_convrnn.SocialConvRNN_'
+  directory: '/home/balint/Documents/precog/output/esp_train_results/2021-01/01-26-20-39-21_ind_heckstrasse_precog.bijection.social_convrnn.SocialConvRNN_'
 
 hardware:
   allow_growth: true

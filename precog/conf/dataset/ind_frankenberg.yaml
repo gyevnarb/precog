@@ -2,7 +2,7 @@ dataset:
   class: precog.dataset.serialized_dataset.SerializedDataset
   name: ind_heckstrasse
   params:
-    root_path: /home/balint/Documents/precog/data/ind_heckstrasse
+    root_path: /home/balint/Documents/precog/data/ind_frankenberg
     _max_A: 10
     B: 10
     T: 20
@@ -14,4 +14,4 @@ dataset:
     val_suffix: '/val/'
     test_suffix: '/test/'
     match_prefix: "ma_datum_*"
-    _name: 'ind_heckstrasse'
+    _name: 'ind_frankenberg'

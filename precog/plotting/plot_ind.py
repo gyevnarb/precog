@@ -96,3 +96,15 @@ def plot_trajectory(traj, fig=None, ax=None, alpha=None, zorder=1, marker='o', m
     if axis is not None:
         ax.axis(axis)
     return fig, ax
+
+
+def plot_rollout_trajectories(batch_index, trajectories, S_past):
+    fig, ax = plt.subplots(1, 1)
+
+    live_agents = [i for i, traj in enumerate(S_past[batch_index]) if not np.allclose(traj, 0.0)]
+    trajs = trajectories[batch_index, :, live_agents, ...]
+    for sample in trajs:
+        for i, agent in zip(live_agents, sample):
+            ax.plot(*agent.T, color=cm.get_cmap("tab10").colors[i])
+
+    plt.show()

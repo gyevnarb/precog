@@ -87,7 +87,7 @@ def main(cfg):
                   "is compatible with the model?".format(v, cfg.dataset))
             raise v
 
-        if False and cfg.main.plot:
+        if cfg.main.plot:
             log.info("Plotting...")
             for b in range(sampled_output_np.phi.S_past_world_frame.shape[0]):
                 if cfg.main.ind:
@@ -116,7 +116,7 @@ def main(cfg):
             S = sampled_output_np.rollout.S_world_frame
             K = sampled_output_np.rollout.S_world_frame.shape[1]
             goal_completion = [[] for _ in range(cfg.dataset.params.B)]
-            trajectories = np.repeat(S_past_.copy()[:, np.newaxis, ...], K, axis=1)
+            trajectories = np.repeat(S_past_.copy()[:, np.newaxis, ...], K, axis=1)  # (B, K, A, try_count * Tp, D)
 
             for i in range(cfg.goal_detection.try_count):
                 done = ind_util.GoalDetector.update_precog_completion(goal_completion, cfg, S, S_past_)
@@ -143,6 +143,9 @@ def main(cfg):
                 S = np.hstack(S)
                 S_past = np.stack(S_past, axis=1)
                 trajectories = np.append(trajectories, S_past, axis=3)
+
+            for b in range(cfg.dataset.params.B):
+                plot_ind.plot_rollout_trajectories(b, trajectories, S_past_)
 
         if cfg.main.compute_metrics:
             for k, vals in all_metrics.items():

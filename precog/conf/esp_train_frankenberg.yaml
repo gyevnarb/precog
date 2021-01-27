@@ -30,7 +30,7 @@ dataset:
 defaults:
   - hardware: shared_gpu  
   - optimizer: sgd_optimizer
-  - dataset: ind_heckstrasse
+  - dataset: ind_frankenberg
   - bijection: social_convrnn
   - distribution: bijective_distribution
   - objective: forward_kl
