@@ -2,7 +2,7 @@ import atexit
 import logging
 import hydra
 import functools
-import dill
+import pandas as pd
 import numpy as np
 import os
 import scipy.stats
@@ -29,10 +29,10 @@ def remove_future_tensors(cfg, inference, minibatch):
 
 @hydra.main(config_path='conf/esp_infer_config.yaml')
 def main(cfg):
-    assert (cfg.main.plot or cfg.main.compute_metrics)
     output_directory = os.path.realpath(os.getcwd())
     images_directory = os.path.join(output_directory, 'images')
     os.mkdir(images_directory)
+    os.mkdir(os.path.join(images_directory, 'rollout'))
     log.info("\n\nConfig:\n===\n{}".format(cfg.pretty()))
 
     atexit.register(logu.query_purge_directory, output_directory)
@@ -52,8 +52,6 @@ def main(cfg):
         infer_metrics = tfutil.get_collection_dict(tensor_collections['infer_metric'])
         metrics = {**infer_metrics, **sample_metrics}
         all_metrics = {_: [] for _ in metrics.keys()}
-    if cfg.main.compute_goals:
-        goal_metrics = {}
 
     # Instantiate the dataset.
     cfg.dataset.params.T = inference.metadata.T
@@ -62,6 +60,8 @@ def main(cfg):
 
     log.info("Beginning evaluation. Model: {}".format(ckpt))
     count = 0
+    rollout_count = 0
+    start_batch_number = 0
     while True:
         minibatch, metadata = dataset.get_minibatch(split=cfg.split, input_singleton=inference.training_input,
                                                     is_training=False, return_metadata=True)
@@ -87,6 +87,52 @@ def main(cfg):
                   "is compatible with the model?".format(v, cfg.dataset))
             raise v
 
+        if cfg.main.compute_goals:
+            log.info(f"Running goal recognition for {cfg.goal_detection.try_count} iterations:")
+            S_past = sampled_output_np.phi.S_past_world_frame  # (B, A, Tp, D)
+            S = sampled_output_np.rollout.S_world_frame
+            K = sampled_output_np.rollout.S_world_frame.shape[1]
+            trajectories = np.repeat(S_past.copy()[:, np.newaxis, ...], K, axis=1)  # (B, K, A, try_count * Tp, D)
+            trajectories = np.append(trajectories, S, axis=3)
+
+            for i in range(cfg.goal_detection.try_count):
+                goal_completion, dones = ind_util.InDGoalDetector.update_precog_completion(
+                    cfg, trajectories, S_past, scale=metadata["vis_scale"][0])
+                log.info(f"Rollout {i} - Goal reached for agents "
+                         f"{[i for i, b in enumerate(goal_completion) if len(b) == 0]}")
+                if all(dones):
+                    log.info("All agents' goal reached")
+                    break
+
+                synthetic_data = ind_util.InDMultiagentDatum.from_precog_predictions(
+                    cfg, S, S_past, sampled_output_np.phi.overhead_features, metadata)
+
+                S = ind_util.rollout_future(synthetic_data, cfg, sess, inference, dataset)
+                trajectories = np.append(trajectories, S, axis=3)
+
+            goal_completion, dones = ind_util.InDGoalDetector.update_precog_completion(
+                cfg, trajectories, S_past, scale=metadata["vis_scale"][0])
+
+            if cfg.goal_detection.plot_rollout:
+                for b in range(cfg.dataset.params.B):
+                    vis_layer = metadata["vis_layer"][b]
+                    limit = [0, vis_layer.shape[1], vis_layer.shape[0], 0]
+                    im = plot_ind.plot_rollout_trajectories(b, trajectories, S_past,
+                                                            figsize=cfg.images.figsize,
+                                                            background=vis_layer, limit=limit)
+                    skimage.io.imsave(f'{images_directory}/rollout/esp_rollout_{rollout_count:05d}.{cfg.images.ext}',
+                                      im[0, ..., :3])
+                    log.info("Rollout plotted.")
+                    rollout_count += 1
+
+            results = ind_util.InDGoalDetector.predict_proba(goal_completion,
+                                                             metadata["true_goals"],
+                                                             trajectories, S_past, cfg,
+                                                             metadata["vis_scale"][0],
+                                                             start_batch_number)
+            results.to_csv(os.path.join(output_directory, "results.csv"),
+                           mode="a", index=False, header=(start_batch_number == 0))
+
         if cfg.main.plot:
             log.info("Plotting...")
             for b in range(sampled_output_np.phi.S_past_world_frame.shape[0]):
@@ -110,46 +156,11 @@ def main(cfg):
                 log.info("Plotted.")
                 count += 1
 
-        if cfg.main.compute_goals:
-            log.info(f"Running goal recognition for {cfg.goal_detection.try_count} iterations:")
-            S_past_ = sampled_output_np.phi.S_past_world_frame  # (B, A, Tp, D)
-            S = sampled_output_np.rollout.S_world_frame
-            K = sampled_output_np.rollout.S_world_frame.shape[1]
-            goal_completion = [[] for _ in range(cfg.dataset.params.B)]
-            trajectories = np.repeat(S_past_.copy()[:, np.newaxis, ...], K, axis=1)  # (B, K, A, try_count * Tp, D)
-
-            for i in range(cfg.goal_detection.try_count):
-                done = ind_util.GoalDetector.update_precog_completion(goal_completion, cfg, S, S_past_)
-                if done: break
-
-                synthetic_data = ind_util.InDMultiagentDatum.from_precog_predictions(
-                    cfg, S, S_past_, sampled_output_np.phi.overhead_features, metadata)
-                S = []
-                S_past = []
-                # Iterate over each sample in every minibatch and feed predictions back into the model
-                for s in range(K):
-
-                    minibatch = dataset.get_minibatch(split=cfg.split, input_singleton=inference.training_input,
-                                                      is_training=False, return_metadata=False,
-                                                      data_feed=synthetic_data[s])
-                    remove_future_tensors(cfg, inference, minibatch)
-                    if minibatch is None: break
-
-                    sessrun = functools.partial(sess.run, feed_dict=minibatch)
-                    sample = inference.sampled_output.to_numpy(sessrun)
-                    sample_future = sample.rollout.S_world_frame[:, [0], ...]  # Only keep the first sampling
-                    S.append(sample_future)
-                    S_past.append(sample.phi.S_past_world_frame)
-                S = np.hstack(S)
-                S_past = np.stack(S_past, axis=1)
-                trajectories = np.append(trajectories, S_past, axis=3)
-
-            for b in range(cfg.dataset.params.B):
-                plot_ind.plot_rollout_trajectories(b, trajectories, S_past_)
-
         if cfg.main.compute_metrics:
             for k, vals in all_metrics.items():
                 log.info("Mean,sem '{}'={:.3f} +- {:.3f}".format(k, np.mean(vals), scipy.stats.sem(vals, axis=None)))
+
+        start_batch_number += cfg.dataset.params.B
 
     if cfg.main.compute_metrics:
         log.info("Final metrics\n=====\n")

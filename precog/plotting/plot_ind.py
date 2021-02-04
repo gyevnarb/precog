@@ -1,19 +1,10 @@
-import functools
-import logging
 import numpy as np
-import matplotlib
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
-import pdb
-import skimage.transform
 import tensorflow as tf
 
-import precog.interface as interface
-
 import precog.utils.log_util as logu
-import precog.utils.mpl_util as mplu
 import precog.utils.tensor_util as tensoru
-import precog.ext.nuscenes.nuscenes as nuscenes
 
 from .plot import plot_figure
 
@@ -23,11 +14,10 @@ def plot_sample(S, S_past, b=0, figsize=(4, 4), partial_write_np_image_to_tb=Non
     fig, ax = plt.subplots(1, 1, figsize=figsize)
 
     vis_layer = bev_kwargs["vis_layer"][b]
-    vis_scale = bev_kwargs["vis_scale"][b]
     limit = [0, vis_layer.shape[1], vis_layer.shape[0], 0]
 
     plot_single_sampled_output(S, S_past, batch_index=b, fig=fig, ax=ax,
-                               scale=vis_scale, limit=limit)
+                               scale=0, limit=limit)
     ax.imshow(vis_layer, cmap='gray', vmin=0, vmax=255)
 
     res = plot_figure('sampled_minibatch', fig, partial_write_np_image_to_tb=partial_write_np_image_to_tb)
@@ -71,7 +61,7 @@ def plot_joint_trajectory(joint_traj, limit, scale=1, agents=None, fig=None, ax=
 
         if scale > 0:
             single_traj *= scale
-            single_traj[..., -1] *= -1
+        single_traj[..., -1] *= -1
 
         fig, ax = plot_trajectory(single_traj, color=color, fig=fig, ax=ax, axis=limit, **kwargs)
         assert (fig is not None)
@@ -98,13 +88,31 @@ def plot_trajectory(traj, fig=None, ax=None, alpha=None, zorder=1, marker='o', m
     return fig, ax
 
 
-def plot_rollout_trajectories(batch_index, trajectories, S_past):
-    fig, ax = plt.subplots(1, 1)
+def plot_rollout_trajectories(batch_index, trajectories, S_past, figsize, background, limit):
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+    ax.axis(limit)
+
+    T_p = S_past.shape[-2]
 
     live_agents = [i for i, traj in enumerate(S_past[batch_index]) if not np.allclose(traj, 0.0)]
-    trajs = trajectories[batch_index, :, live_agents, ...]
-    for sample in trajs:
-        for i, agent in zip(live_agents, sample):
-            ax.plot(*agent.T, color=cm.get_cmap("tab10").colors[i])
+    agent_trajectories = trajectories[batch_index, :, live_agents, ...]
+    for i, agent in enumerate(agent_trajectories):
+        for sample in agent:
+            single_traj = sample.copy()
+            single_traj[..., -1] *= -1
+            ax.plot(*single_traj[:T_p].T,
+                    marker="d",
+                    zorder=2,
+                    alpha=0.4,
+                    color=cm.get_cmap("tab10").colors[i])
+            ax.plot(*single_traj[T_p:].T,
+                    marker='o',
+                    zorder=1,
+                    alpha=0.5,
+                    color=cm.get_cmap("tab10").colors[i])
 
-    plt.show()
+    ax.imshow(background, cmap='gray', vmin=0, vmax=255)
+
+    res = plot_figure('rollout_minibatch', fig, partial_write_np_image_to_tb=lambda x: x)
+    plt.close("all")
+    return res

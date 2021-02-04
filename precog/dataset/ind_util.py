@@ -1,6 +1,8 @@
 #  This file is a modified version of the config class from the file:
 # https://github.com/nrhine1/precog/blob/master/precog/dataset/preprocess_nuscenes.py
 from typing import List
+import functools
+import pandas as pd
 
 import numpy as np
 import cv2 as cv
@@ -21,6 +23,32 @@ def rotate(image, angle):
     rot_mat = cv.getRotationMatrix2D(image_center, angle, 1.0)
     result = cv.warpAffine(image, rot_mat, image.shape[1::-1], flags=cv.INTER_CUBIC, borderValue=255)
     return result
+
+
+def rollout_future(data, cfg, sess, inference, dataset):
+    S = []
+    # Iterate over each sample in every minibatch and feed predictions back into the model
+    for sample in data:
+        s_minibatch = dataset.get_minibatch(split=cfg.split, input_singleton=inference.training_input,
+                                            is_training=False, return_metadata=False,
+                                            data_feed=sample)
+        if not cfg.main.compute_metrics:
+            for t in inference.training_input.experts.tensors:
+                try:
+                    del s_minibatch[t]
+                except KeyError:
+                    pass
+
+        if s_minibatch is None:
+            break
+
+        sessrun = functools.partial(sess.run, feed_dict=s_minibatch)
+        sample = inference.sampled_output.to_numpy(sessrun)
+        sample_future = sample.rollout.S_world_frame[:, [0], ...]  # Only keep the first sampling
+        S.append(sample_future)
+
+    S = np.hstack(S)
+    return S
 
 
 class InDConfig:
@@ -356,9 +384,10 @@ class InDMultiagentDatum:
                                     agent_dim[0], agent_dim[1], agent_yaws[i]).get_display_box(vis_scale)
                     agent_box = agent_box.reshape((-1, 1, 2))
                     cv.fillPoly(agents_layer, [agent_box], 0, cv.LINE_AA)
+                mask = agents_layer != 255
+                agents_layer[mask] = 1
+                agents_layer[~mask] = 0
                 image = np.append(feature_list, agents_layer[..., np.newaxis], axis=-1)
-                mask = image != 255
-                image[mask] = 0
 
                 datum = cls(player_past, agent_pasts,
                             player_future, agent_futures,
@@ -407,64 +436,109 @@ class Box:
         return permuter @ (scale * np.abs(self.bounding_box)).astype(np.int32)
 
 
-class GoalDetector:
+class InDGoalDetector:
     """ Detects the goals of agents based on their trajectories"""
 
-    def __init__(self, possible_goals, dist_threshold=1.5):
+    def __init__(self, possible_goals, dist_threshold=1.5, scale=1.0):
         self.dist_threshold = dist_threshold
-        self.possible_goals = possible_goals
+        self.possible_goals = np.array(possible_goals)
+        self.scale = scale
+        if scale > 0:
+            self.possible_goals *= scale
 
-    def detect_goals(self, frames):
+    def detect_goals_precog(self, trajectory, cfg):
         goals = []
-        goal_frames = []
-        for frame in frames:
-            agent_point = np.array([frame.x, frame.y])
 
-            for goal_idx, goal_point in enumerate(self.possible_goals):
-                dist = np.linalg.norm(agent_point - goal_point)
-                if dist <= self.dist_threshold and goal_idx not in goals:
-                    goals.append(goal_idx)
-                    goal_frames.append(frame.frame_id)
-        return goals, goal_frames
+        # Re-sample frequency for finer granularity
+        ret = []
+        targets = np.arange(0, len(trajectory) / cfg.goal_detection.samples_frequency,
+                            1 / cfg.goal_detection.resample_frequency)
+        timestamps = np.arange(0, len(trajectory) / cfg.goal_detection.samples_frequency,
+                               1 / cfg.goal_detection.samples_frequency)
+        for axis in trajectory.T:
+            interp = np.interp(targets, timestamps, axis)
+            ret.append(interp)
+        trajectory = np.array(ret).T
 
-    def detect_goals_precog(self, trajectory):
-        goals = []
         for goal_idx, goal_point in enumerate(self.possible_goals):
             distance = np.linalg.norm(trajectory - np.array(goal_point), axis=1)
             close_points = np.argwhere(distance < self.dist_threshold)
             if len(close_points) > 0:
                 goals.append(goal_idx)
-        return goals
+        return goals[0] if len(goals) > 0 else -1
 
-    def get_agents_goals_ind(self, tracks, static_info, meta_info, map_meta, agent_class='car'):
-        goal_locations = map_meta.goals
-        agent_goals = {}
-        for track_idx in range(len(static_info)):
-            if static_info[track_idx]['class'] == agent_class:
-                track = tracks[track_idx]
-                agent_goals[track_idx] = []
-
-                for i in range(static_info[track_idx]['numFrames']):
-                    point = np.array([track['xCenter'][i], track['yCenter'][i]])
-                    for goal_idx, loc in enumerate(goal_locations):
-                        dist = np.linalg.norm(point - loc)
-                        if dist < self.dist_threshold and loc not in agent_goals[track_idx]:
-                            agent_goals[track_idx].append(loc)
-        return agent_goals
+    def find_nearest_goal(self, S, batch_idx, sample_idx, agent_idx):
+        final_pose = S[batch_idx, sample_idx, agent_idx, -1, :]
+        dists = np.linalg.norm(self.possible_goals - final_pose, axis=1)
+        return dists.argmin()
 
     @classmethod
-    def update_precog_completion(cls, goal_completion, cfg, S, S_past):
-        goal_detector = cls(cfg.goal_detection.goals, cfg.goal_detection.threshold)
+    def update_precog_completion(cls, cfg, S, S_past, scale):
+        goal_detector = cls(cfg.goal_detection.goals, cfg.goal_detection.threshold, scale)
         B, K, A, Tf, D = S.shape
 
-        for b in [i for i, b in enumerate(goal_completion) if len(b) == 0]:
+        goal_completion = []
+        dones = []
+        for b in range(B):
             live_agents = [i for i, traj in enumerate(S_past[b]) if not np.allclose(traj, 0.0)]
-            sections = []
+            batch = {}
+            done = False
             for a in live_agents:
+                batch[a] = {}
                 for s in range(K):
                     single_traj = S[b, s, a]
-                    goals = goal_detector.detect_goals_precog(single_traj)
-                    if len(goals) > 0:
-                        sections.append({"section": b, "agent": a, "sample": s, "goals": goals})
-            goal_completion[b].extend(sections)
-        return len([i for i, b in enumerate(goal_completion) if len(b) == 0]) == 0
+                    goal = goal_detector.detect_goals_precog(single_traj, cfg)
+                    batch[a][s] = goal
+                    done = done or (goal != -1)
+            goal_completion.append(batch)
+            dones.append(done)
+        return goal_completion, dones
+
+    @classmethod
+    def predict_proba(cls, goal_completion, true_goals, S, S_past, cfg, scale, start_batch_num):
+        goal_detector = cls(cfg.goal_detection.goals, cfg.goal_detection.threshold, scale)
+        G = len(cfg.goal_detection.goals)  # Number of goals in the current scenario
+        K = S.shape[1]
+
+        results = []
+        for b, batch in enumerate(goal_completion):
+            live_agents = [i for i, traj in enumerate(S_past[b]) if not np.allclose(traj, 0.0)]
+            counts = {a: {g: 0 for g in range(G)} for a in live_agents}
+
+            for agent in batch:
+                for sample, goal in batch[agent].items():
+                    if goal == -1:
+                        goal = goal_detector.find_nearest_goal(S, b, sample, agent)
+                    counts[agent][goal] += 1
+
+            # Normalise distribution
+            dist = {}
+            for agent, goal_dist in counts.items():
+                total = sum(goal_dist.values())
+                dist[agent] = {k: v / total for k, v in goal_dist.items()}
+
+            # Write results dataframe
+            for agent, goal_dist in dist.items():
+                new_result = {
+                    "batch_id": start_batch_num + b,
+                    "agent_id": agent,
+                    "true_goal": int(true_goals[b][agent]),
+                    "num_missed": len([_ for _ in goal_completion[b][agent].values() if _ == -1]),
+                    "raw_correct": len([_ for _ in goal_completion[b][agent].values() if _ == true_goals[b][agent]]),
+                }
+                new_result.update({
+                    "raw_accuracy": new_result["raw_correct"] / K,
+                    "adj_accuracy": counts[agent][new_result["true_goal"]] / K
+                })
+                for i in range(G):
+                    new_result.update({
+                        f"raw_g{i}": len([_ for _ in goal_completion[b][agent].values() if _ == i]),
+                        f"adj_g{i}": counts[agent][i],
+                        f"prob_g{i}": goal_dist[i]
+                    })
+
+                results.append(new_result)
+        results = pd.DataFrame(results)
+        return results
+
+

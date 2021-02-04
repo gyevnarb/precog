@@ -44,7 +44,10 @@ def ind_heckstrasse_metadata_producer(data):
     items.append(interface.MetadataItem(name="vis_scale", array=vis_scale, dtype=np.float64))
 
     agent_dims = [data[i].metadata["agent_dims"] for i in range(len(data))]
-    items.append(interface.MetadataItem(name="agent_dims", array=agent_dims, dtype=None))
+    items.append(interface.MetadataItem(name="agent_dims", array=agent_dims, dtype=object))
+
+    true_goals = [data[i].metadata["true_goals"] for i in range(len(data))]
+    items.append(interface.MetadataItem(name="true_goals", array=true_goals, dtype=int))
 
     return items
 
@@ -52,8 +55,8 @@ def ind_heckstrasse_metadata_producer(data):
 PRODUCERS = {
     "trimodal_dataset": lambda *args, **kwargs: interface.MetadataList(),
     'ind_heckstrasse_dill': ind_heckstrasse_metadata_producer,
-    'ind_bendplatz_dill': lambda *args, **kwargs: interface.MetadataList(),
-    'ind_frankenberg_dill': lambda *args, **kwargs: interface.MetadataList(),
+    'ind_bendplatz_dill': ind_heckstrasse_metadata_producer,
+    'ind_frankenberg_dill': ind_heckstrasse_metadata_producer,
     'nuscenes_shuffle_A5_dill': nuscenes_dill_metadata_producer,
     'nuscenes_mini_dill': nuscenes_mini_dill_metadata_producer,
     'carla_town01_A5_T20_json': carla_town01_A5_T20_metadata_producer,
