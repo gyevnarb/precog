@@ -102,26 +102,25 @@ class SerializedDataset(interface.ESPDataset, minibatched_dataset.MinibatchedDat
     def get_minibatch(self, is_training, split='train', mb_idx=None, input_singleton=None,
                       return_metadata=False, data_feed=None,
                       *args, **kwargs):
-        if mb_idx is None:
-            # Use the minibatch tracker to get the current minibatch index for the split
-            mb_idx = self.smt.mb_indices[split]
-            # Update the state of the split's minibatch tracker
-            self.smt.mb_indices[split] += 1
-        else:
-            # If the mb_idx is provided, don't do any index updating.
-            pass
-
-        # If the minibatch tracker is out of bounds, reset the split, and return None to indicate the epoch is over.
-        if mb_idx >= self.smt.mb_maxes[split] or mb_idx < 0:
-            self.reset_split(split)
-            return None
-
-        k = lambda _, _k: getattr(_, self.keyremap[_k])
-
         if data_feed is None:
+            if mb_idx is None:
+                # Use the minibatch tracker to get the current minibatch index for the split
+                mb_idx = self.smt.mb_indices[split]
+                # Update the state of the split's minibatch tracker
+                self.smt.mb_indices[split] += 1
+            else:
+                # If the mb_idx is provided, don't do any index updating.
+                pass
+
+            # If the minibatch tracker is out of bounds, reset the split, and return None to indicate the epoch is over.
+            if mb_idx >= self.smt.mb_maxes[split] or mb_idx < 0:
+                self.reset_split(split)
+                return None
             data = self._fetch_minibatch(mb_idx, split)
         else:
             data = data_feed
+
+        k = lambda _, _k: getattr(_, self.keyremap[_k])
 
         # (1, B, T, d)
         player_experts = np.stack([np.asarray(k(_, 'player_future')) for _ in data], 0)[None]
