@@ -32,10 +32,6 @@ def rollout_future(data, cfg, sess, inference, dataset):
         s_minibatch = dataset.get_minibatch(split=cfg.split, input_singleton=inference.training_input,
                                             is_training=False, return_metadata=False,
                                             data_feed=sample)
-        if s_minibatch is None:
-            s_minibatch = dataset.get_minibatch(split=cfg.split, input_singleton=inference.training_input,
-                                                is_training=False, return_metadata=False,
-                                                data_feed=sample)
         if not cfg.main.compute_metrics:
             for t in inference.training_input.experts.tensors:
                 try:

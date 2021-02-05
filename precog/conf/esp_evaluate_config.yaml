@@ -1,0 +1,21 @@
+goal_detection:
+  scenario: [heckstrasse, bendplatz, frankenberg]
+  traj_frequency: 10
+  resample_traj_frequency: 25
+  K: 20
+  plot_rollout: true
+  rollouts: 2
+  threshold: 1.5
+
+results:
+  dir: /home/balint/Documents/precog/output/esp_infer_results/2021-02/
+
+hydra:
+  job_logging:
+    handlers:
+      console:
+        level: INFO
+      file:
+        level: DEBUG
+  run:
+    dir: /home/balint/Documents/precog/output/esp_evaluate_results/${now:%Y-%m}/${now:%m-%d-%H-%M-%S}_ind
