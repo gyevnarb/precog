@@ -67,9 +67,8 @@ class InDConfig:
         self.sample_period = 2  # Hz
         self.sample_frequency = 1. / self.sample_period
 
-        # Predict 2 seconds in the future with 2 seconds of past.
         self.past_horizon_seconds = 2  # Tp
-        self.future_horizon_seconds = 3  # Tf
+        self.future_horizon_seconds = 4  # Tf
 
         # The number of samples we need.
         self.future_horizon_length = int(round(self.future_horizon_seconds * self.frame_rate))
