@@ -35,6 +35,7 @@ def main(cfg):
         results = pd.merge(results, fracs, on=["batch_id", "agent_id"], how="left")
         results["rounded_total_frac"] = (results["frac_total_observed"] / cfg.goal_detection.plot_step).astype(int) + 1
         results["rounded_window_frac"] = (results["frac_window_observed"] / cfg.goal_detection.plot_step).astype(int) + 1
+        results["rounded_frac_before_goal"] = (results["frac_before_goal"] / cfg.goal_detection.plot_step).astype(int) + 1
         log.info(f"Average number of misses: {results['num_missed'].mean():.3f}+-{results['num_missed'].sem():.3f}")
         log.info(f"Average raw accuracy: {results['raw_accuracy'].mean():.3f}+-{results['raw_accuracy'].sem():.3f}")
         log.info(f"Average adjusted accuracy: {results['adj_accuracy'].mean():.3f}+-{results['adj_accuracy'].sem():.3f}")
@@ -54,8 +55,8 @@ def main(cfg):
         log.info(f"Average normalised sample entropy: {h.mean():.3f}+-{h.sem():.3f}")
 
         results["entropy"] = h
-        sns.lineplot(data=results, x="rounded_total_frac", y="adj_accuracy", ax=ax[0])
-        sns.lineplot(data=results, x="rounded_total_frac", y="entropy", ax=ax[1])
+        sns.lineplot(data=results, x="rounded_frac_before_goal", y="adj_accuracy", ax=ax[0])
+        sns.lineplot(data=results, x="rounded_frac_before_goal", y="entropy", ax=ax[1])
 
         log.info("")
 
