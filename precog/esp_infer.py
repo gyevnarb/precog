@@ -7,6 +7,7 @@ import numpy as np
 import os
 import scipy.stats
 import skimage.io
+import time
 
 import precog.utils.log_util as logu
 import precog.utils.tfutil as tfutil
@@ -62,6 +63,7 @@ def main(cfg):
     count = 0
     rollout_count = 0
     start_batch_number = 0
+
     while True:
         minibatch, metadata = dataset.get_minibatch(split=cfg.split, input_singleton=inference.training_input,
                                                     is_training=False, return_metadata=True)
@@ -95,6 +97,9 @@ def main(cfg):
             trajectories = np.repeat(S_past.copy()[:, np.newaxis, ...], K, axis=1)  # (B, K, A, try_count * Tp, D)
             trajectories = np.append(trajectories, S, axis=3)
 
+            timing_info = []
+            t_rollout = 0.0
+
             for i in range(cfg.goal_detection.try_count):
                 goal_completion, dones = ind_util.InDGoalDetector.update_precog_completion(
                     cfg, trajectories, S_past, scale=metadata["vis_scale"][0])
@@ -104,8 +109,10 @@ def main(cfg):
                     log.info("All agents' goal reached")
                     break
 
+                start = time.time()
                 synthetic_data = ind_util.InDMultiagentDatum.from_precog_predictions(
                     cfg, S, S_past, sampled_output_np.phi.overhead_features, metadata)
+                t_rollout += time.time() - start
 
                 S = ind_util.rollout_future(synthetic_data, cfg, sess, inference, dataset)
                 trajectories = np.append(trajectories, S, axis=3)
@@ -125,11 +132,22 @@ def main(cfg):
                     log.info("Rollout plotted.")
                     rollout_count += 1
 
+            start = time.time()
             results = ind_util.InDGoalDetector.predict_proba(goal_completion,
                                                              metadata["true_goals"],
                                                              trajectories, S_past, cfg,
                                                              metadata["vis_scale"][0],
                                                              start_batch_number)
+            t_adj = time.time() - start
+
+            timing_info.append({"rollout": t_rollout, "adjustment": t_adj,
+                                "n_rollout": cfg.goal_detection.try_count,
+                                "n_samples": K,
+                                "n_batch": S_past.shape[0],
+                                "n_agents": S_past.shape[1]})
+            timing_info = pd.DataFrame(timing_info)
+            timing_info.to_csv(os.path.join(output_directory, "timings.csv"),
+                               mode="a", index=False, header=(start_batch_number == 0))
             results.to_csv(os.path.join(output_directory, "results.csv"),
                            mode="a", index=False, header=(start_batch_number == 0))
 
